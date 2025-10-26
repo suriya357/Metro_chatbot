@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chennai Metro Route Finder</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        /* CSS for the blinking cursor effect in bot messages */
+        .bot-msg::after {
+            content: "|";
+            animation: blink 0.8s infinite;
+            opacity: 0.5;
+        }
+        @keyframes blink {
+            0% { opacity: 0.5; }
+            50% { opacity: 0; }
+            100% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body>
+    <div class="main-layout-container">
+        <div class="left-panel">
+            <div id="chat-box"></div>
+
+            <div class="input-area">
+                <label for="start-area">From:</label>
+                <select id="start-area"><option value="">--Select--</option></select>
+
+                <label for="end-area">To:</label>
+                <select id="end-area"><option value="">--Select--</option></select>
+
+                <label for="algorithm">Algorithm:</label>
+                <select id="algorithm">
+                    <option value="bfs">BFS</option>
+                    <option value="dfs">DFS</option>
+                    <option value="a_star">A* Search</option>
+                    <option value="greedy">Greedy Search</option>
+                    <option value="ucs">Uniform Cost Search</option>
+                    <option value="dls">Depth Limited Search</option>
+                    <option value="iddfs">IDDFS</option>
+                    <option value="ao_star">AO* Search (Not Supported)</option>
+                </select>
+
+                <button onclick="findPath()">Find Path</button>
+            </div>
+
+            <div id="path-output-details">
+                <p id="path-stations-output">Path: -</p>
+                <p id="station-count-output">Stations: 0</p>
+                <p id="total-distance-output">Total Distance: -</p>
+                <p id="estimated-time-output">Estimated Time: -</p>
+            </div>
+        </div>
+
+        <div class="right-panel">
+            <div class="view-toggle">
+                <button id="show-map-btn" onclick="toggleView('map')">Map View 🗺️</button>
+                <button id="show-graph-btn" class="active" onclick="toggleView('graph')">Graph View 📊</button>
+            </div>
+
+            <div id="map-view-container" class="map-view">
+                <div id="map"></div>
+            </div>
+
+            <div id="graph-view-container" class="graph-view active">
+                <canvas id="metro-graph-canvas"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        // Station Coordinates (Latitude, Longitude) - Used for map plotting directly
+        const stationCoords = {
+            "Central": [13.0827, 80.2707],
+            "High Court": [13.0972, 80.2879],
+            "Mannadi": [13.0991, 80.2910],
+            "Washermanpet": [13.1106, 80.2867],
+            "Egmore": [13.0829, 80.2610],
+            "Nehru Park": [13.0871, 80.2470],
+            "Kilpauk": [13.0887, 80.2400],
+            "Pachaiyappa's College": [13.0900, 80.2350],
+            "Shenoy Nagar": [13.0887, 80.2300],
+            "Anna Nagar East": [13.0878, 80.2170],
+            "Anna Nagar Tower": [13.0874, 80.2100],
+            "Thirumangalam": [13.0852, 80.2030],
+            "Koyambedu": [13.0722, 80.1986],
+            "CMBT": [13.0670, 80.2050],
+            "Arumbakkam": [13.0633, 80.2120],
+            "Vadapalani": [13.0484, 80.2133],
+            "Ashok Nagar": [13.0334, 80.2135],
+            "Ekkatuthangal": [13.0250, 80.2097],
+            "Guindy": [13.0082, 80.2206],
+            "Alandur": [12.9944, 80.2037],
+            "St. Thomas Mount": [12.9883, 80.2016],
+            "Meenambakkam": [12.9822, 80.1762],
+            "Airport": [12.9808, 80.1638],
+            "Nanganallur Road": [12.9964, 80.1967],
+            "Little Mount": [13.0046, 80.2210],
+            "Saidapet": [13.0234, 80.2278],
+            "TEYNAMPET": [13.0350, 80.2370],
+            "AG-DMS": [13.0440, 80.2489],
+            "Thousand Lights": [13.0526, 80.2572],
+            "LIC": [13.0641, 80.2672],
+            "Government Estate": [13.0718, 80.2703]
+        };
+
+        // --- Leaflet Map Initialization ---
+        var map = L.map('map').setView([13.05, 80.25], 12);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        var routeLayer = L.polyline([], {color: 'blue', weight: 5}).addTo(map);
+        var graphLineLayer = L.layerGroup().addTo(map);
+        var pathMarkers = [];
+        var allStationMarkers = [];
+
+        // --- Canvas Graph Drawing ---
+        const canvas = document.getElementById('metro-graph-canvas');
+        const ctx = canvas.getContext('2d');
+        let graphDataFromBackend = null; // To store graph structure from backend
+        let currentAnimationSteps = []; // Stores the steps for current animation
+        let animationFrameId = null; // To cancel animation frame
+        let currentStepIndex = 0;
+        let animationSpeed = 100; // Milliseconds per step
+
+        // This variable will store the final path received from the backend, for correct final display on canvas
+        let finalBackendPathForGraphView = [];
+
+        // Approximate coordinates based on the user's provided graph image
+        // Adjusted for a more central and spread out layout within the canvas
+        const stationCanvasCoords = {
+            "Central": [350, 250],
+            "High Court": [350, 190],
+            "Mannadi": [350, 130],
+            "Washermanpet": [350, 70],
+
+            "Egmore": [290, 300],
+            "Nehru Park": [250, 350],
+            "Kilpauk": [250, 400],
+            "Pachaiyappa's College": [310, 450],
+            "Shenoy Nagar": [400, 450],
+            "Anna Nagar East": [470, 450],
+            "Anna Nagar Tower": [530, 450],
+            "Thirumangalam": [590, 430],
+            "Koyambedu": [650, 380],
+            "CMBT": [700, 340],
+            "Arumbakkam": [750, 300],
+            "Vadapalani": [780, 250],
+            "Ashok Nagar": [780, 200],
+            "Ekkatuthangal": [750, 150],
+            "Guindy": [700, 110],
+            "Alandur": [630, 80],
+            "St. Thomas Mount": [530, 100],
+            "Meenambakkam": [450, 130],
+            "Airport": [400, 150],
+
+            "Nanganallur Road": [570, 50],
+            "Little Mount": [620, 20],
+            "Saidapet": [670, 0],
+            "TEYNAMPET": [730, 0],
+            "AG-DMS": [780, 30],
+            "Thousand Lights": [780, 80],
+            "LIC": [740, 130],
+            "Government Estate": [680, 190]
+        };
+
+        const NODE_RADIUS = 8;
+        const NODE_COLOR_DEFAULT = '#007bff';
+        const EDGE_COLOR_DEFAULT = '#888';
+        const PATH_COLOR = '#FF0000'; // Red for the path
+        const VISITED_NODE_COLOR = '#FFA500'; // Orange for visited nodes during animation
+        const START_NODE_COLOR = '#008000'; // Green for start
+        const END_NODE_COLOR = '#8B0000'; // Dark Red for end
+        const TEXT_COLOR = '#333';
+
+        // Variables for Canvas Panning
+        let translateX = 0;
+        let translateY = 0;
+        let isDragging = false;
+        let lastMouseX = 0;
+        let lastMouseY = 0;
+
+        // Add Mouse Event Listeners for Panning
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.button === 0) {
+                isDragging = true;
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+                canvas.style.cursor = 'grabbing';
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            const dx = e.clientX - lastMouseX;
+            const dy = e.clientY - lastMouseY;
+            translateX += dx;
+            translateY += dy;
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+            drawCurrentGraphState(undefined, undefined, undefined, undefined, undefined, undefined, finalBackendPathForGraphView); // Redraw with new translation
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            isDragging = false;
+            canvas.style.cursor = 'grab';
+        });
+
+        canvas.addEventListener('mouseout', () => {
+            isDragging = false;
+            canvas.style.cursor = 'grab';
+        });
+
+        // Function to resize canvas to fit its parent
+        function resizeCanvas() {
+            const container = document.getElementById('graph-view-container');
+            if (container) {
+                canvas.width = container.clientWidth;
+                canvas.height = container.clientHeight;
+                drawCurrentGraphState(undefined, undefined, undefined, undefined, undefined, undefined, finalBackendPathForGraphView); // Redraw content after resize
+            }
+        }
+
+        // --- Core Graph Drawing Function ---
+        // pathForAnimation is the 'currentPath' from currentAnimationSteps (shortest path to current node)
+        // finalPathToHighlight is the actual final path from backend (used when not animating)
+        function drawCurrentGraphState(visitedNodes = new Set(), pathForAnimation = [], animating = false, pathFound = false, startNodeId = '', endNodeId = '', finalPathToHighlight = []) {
+            if (!graphDataFromBackend) return; // Ensure graph data is loaded
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear canvas
+            ctx.save(); // Save current canvas state
+
+            // Apply translation (panning)
+            ctx.translate(translateX, translateY);
+
+            // Determine which path to draw for edges and final node colors
+            let activePath = animating ? pathForAnimation : finalPathToHighlight;
+
+            // Draw edges
+            ctx.beginPath();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = EDGE_COLOR_DEFAULT; // Default color for all edges
+            for (const edge of graphDataFromBackend.edges) {
+                const sourceCoords = stationCanvasCoords[edge.source];
+                const targetCoords = stationCanvasCoords[edge.target];
+                if (sourceCoords && targetCoords) {
+                    ctx.moveTo(sourceCoords[0], sourceCoords[1]);
+                    ctx.lineTo(targetCoords[0], targetCoords[1]);
+                }
+            }
+            ctx.stroke();
+
+            // Highlight edges for the current path (if animating or final path)
+            if (activePath && activePath.length > 1) {
+                ctx.beginPath();
+                ctx.strokeStyle = PATH_COLOR; // Red for highlighted path edges
+                ctx.lineWidth = 4;
+                ctx.lineCap = 'round';
+                for (let i = 0; i < activePath.length - 1; i++) {
+                    const node1 = activePath[i];
+                    const node2 = activePath[i+1];
+                    // Check if this edge is part of the active path
+                    if (activePath.includes(node1) && activePath.includes(node2) && Math.abs(activePath.indexOf(node1) - activePath.indexOf(node2)) === 1) {
+                        const coords1 = stationCanvasCoords[node1];
+                        const coords2 = stationCanvasCoords[node2];
+                        if (coords1 && coords2) {
+                            ctx.moveTo(coords1[0], coords1[1]);
+                            ctx.lineTo(coords2[0], coords2[1]);
+                        }
+                    }
+                }
+                ctx.stroke();
+            }
+
+            // Draw nodes and labels
+            for (const node of graphDataFromBackend.nodes) {
+                const coords = stationCanvasCoords[node.id];
+                if (coords) {
+                    let fillColor = NODE_COLOR_DEFAULT;
+                    let strokeColor = '#fff';
+
+                    if (animating) {
+                        if (node.id === startNodeId) {
+                            fillColor = START_NODE_COLOR;
+                        } else if (node.id === endNodeId && pathFound) {
+                            fillColor = END_NODE_COLOR;
+                        } else if (visitedNodes.has(node.id)) {
+                            fillColor = VISITED_NODE_COLOR;
+                        }
+                    } else { // Not animating, show final state based on finalPathToHighlight
+                        if (finalPathToHighlight.includes(node.id)) {
+                            if (node.id === startNodeId) fillColor = START_NODE_COLOR;
+                            else if (node.id === endNodeId) fillColor = END_NODE_COLOR;
+                            else fillColor = PATH_COLOR; // Path nodes in red
+                        } else {
+                            fillColor = NODE_COLOR_DEFAULT;
+                        }
+                    }
+
+                    ctx.beginPath();
+                    ctx.arc(coords[0], coords[1], NODE_RADIUS, 0, Math.PI * 2);
+                    ctx.fillStyle = fillColor;
+                    ctx.fill();
+                    ctx.strokeStyle = strokeColor;
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+
+                    // Draw station name
+                    ctx.fillStyle = TEXT_COLOR;
+                    ctx.font = '10px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(node.id, coords[0], coords[1] + NODE_RADIUS + 10);
+                }
+            }
+            ctx.restore(); // Restore canvas state (undo translation)
+        }
+
+        // --- Frontend BFS/DFS/DLS/IDDFS/A*/UCS/Greedy Implementation (for animation steps) ---
+        function getTraversalSteps(startNode, endNode, algorithm, graphData) {
+            const adj = new Map();
+            const stationNames = new Set();
+            for (const node of graphData.nodes) {
+                stationNames.add(node.id);
+                adj.set(node.id, []);
+            }
+            graphData.edges.forEach(edge => {
+                adj.get(edge.source).push(edge.target);
+                adj.get(edge.target).push(edge.source);
+            });
+
+            const steps = []; // [{visited: Set, currentPath: [], finalPath: boolean, startNodeId: string, endNodeId: string}]
+            const parentMap = new Map(); // To reconstruct path
+
+            if (algorithm === 'bfs') {
+                const queue = [startNode];
+                const visited = new Set([startNode]);
+                steps.push({ visited: new Set(visited), currentPath: [startNode], finalPath: false, startNodeId: startNode, endNodeId: endNode });
+
+                let head = 0;
+                while (head < queue.length) {
+                    const currentNode = queue[head++];
+                    if (currentNode === endNode) {
+                        break;
+                    }
+                    for (const neighbor of adj.get(currentNode)) {
+                        if (!visited.has(neighbor)) {
+                            visited.add(neighbor);
+                            parentMap.set(neighbor, currentNode);
+                            queue.push(neighbor);
+                            const pathFromStartToCurrent = [];
+                            let curr = neighbor;
+                            while(curr !== undefined) {
+                                pathFromStartToCurrent.unshift(curr);
+                                curr = parentMap.get(curr);
+                            }
+                            steps.push({ visited: new Set(visited), currentPath: pathFromStartToCurrent, finalPath: (neighbor === endNode), startNodeId: startNode, endNodeId: endNode });
+                            if (neighbor === endNode) break;
+                        }
+                    }
+                }
+            } else if (algorithm === 'dfs' || algorithm === 'dls' || algorithm === 'iddfs') {
+                const maxDepth = (algorithm === 'dls') ? 5 : (algorithm === 'iddfs' ? stationNames.size : Infinity);
+                let found = false;
+                
+                function dfsRecursive(currentNode, currentDepth, visited) {
+                    if (found) return;
+                    
+                    const newVisited = new Set(visited);
+                    newVisited.add(currentNode);
+                    parentMap.set(currentNode, parentMap.get(currentNode) || null);
+                    
+                    const currentPath = [];
+                    let curr = currentNode;
+                    while (curr !== null) {
+                        currentPath.unshift(curr);
+                        curr = parentMap.get(curr);
+                    }
+
+                    steps.push({ visited: new Set(newVisited), currentPath: currentPath, finalPath: (currentNode === endNode), startNodeId: startNode, endNodeId: endNode });
+                    
+                    if (currentNode === endNode) {
+                        found = true;
+                        return;
+                    }
+                    
+                    if (currentDepth >= maxDepth) return;
+                    
+                    for (const neighbor of adj.get(currentNode)) {
+                        if (!newVisited.has(neighbor)) {
+                            parentMap.set(neighbor, currentNode);
+                            dfsRecursive(neighbor, currentDepth + 1, newVisited);
+                            if (found) return;
+                        }
+                    }
+                }
+
+                if (algorithm === 'iddfs') {
+                    for (let d = 0; d < stationNames.size && !found; d++) {
+                        parentMap.clear();
+                        dfsRecursive(startNode, 0, new Set());
+                    }
+                } else {
+                    dfsRecursive(startNode, 0, new Set());
+                }
+            } else if (['a_star', 'ucs', 'greedy'].includes(algorithm)) {
+                const priorityQueue = [];
+                const visitedNodes = new Set();
+                
+                function heuristic(node) {
+                    if (algorithm === 'ucs') return 0;
+                    const endCoords = stationCoords[endNode];
+                    const nodeCoords = stationCoords[node];
+                    return haversine(nodeCoords[0], nodeCoords[1], endCoords[0], endCoords[1]);
+                }
+
+                function getDistance(node1, node2) {
+                    const coords1 = stationCoords[node1];
+                    const coords2 = stationCoords[node2];
+                    return haversine(coords1[0], coords1[1], coords2[0], coords2[1]);
+                }
+
+                let startF = (algorithm === 'greedy') ? heuristic(startNode) : (0 + heuristic(startNode));
+                let startG = 0;
+                heapq.heappush(priorityQueue, [startF, startG, [startNode]]);
+
+                let found = false;
+                while (priorityQueue.length > 0 && !found) {
+                    const [f_cost, g_cost, path] = heapq.heappop(priorityQueue);
+                    const currentNode = path[path.length - 1];
+
+                    if (visitedNodes.has(currentNode)) {
+                        continue;
+                    }
+                    visitedNodes.add(currentNode);
+
+                    steps.push({ visited: new Set(visitedNodes), currentPath: path, finalPath: (currentNode === endNode), startNodeId: startNode, endNodeId: endNode });
+
+                    if (currentNode === endNode) {
+                        found = true;
+                        break;
+                    }
+
+                    for (const neighbor of adj.get(currentNode)) {
+                        if (!visitedNodes.has(neighbor)) {
+                            const newG = g_cost + getDistance(currentNode, neighbor);
+                            const newF = (algorithm === 'greedy') ? heuristic(neighbor) : (newG + heuristic(neighbor));
+                            const newPath = [...path, neighbor];
+                            heapq.heappush(priorityQueue, [newF, newG, newPath]);
+                        }
+                    }
+                }
+            }
+            
+            return steps;
+        }
+
+        // Haversine function for frontend (must be same as backend)
+        function haversine(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Radius of Earth in kilometers
+            const lat1_rad = lat1 * Math.PI / 180;
+            const lon1_rad = lon1 * Math.PI / 180;
+            const lat2_rad = lat2 * Math.PI / 180;
+            const lon2_rad = lon2 * Math.PI / 180;
+
+            const dlon = lon2_rad - lon1_rad;
+            const dlat = lat2_rad - lat1_rad;
+
+            const a = Math.sin(dlat / 2)**2 + Math.cos(lat1_rad) * Math.cos(lat2_rad) * Math.sin(dlon / 2)**2;
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+            const distance = R * c;
+            return distance;
+        }
+        
+        // Simple Min-Heap implementation for A*, UCS, Greedy Search
+        const heapq = {
+            heappush: (heap, item) => {
+                heap.push(item);
+                let i = heap.length - 1;
+                while (i > 0) {
+                    const parent = Math.floor((i - 1) / 2);
+                    // Compare the first element of the sub-array (the cost)
+                    if (heap[parent][0] > heap[i][0]) {
+                        [heap[parent], heap[i]] = [heap[i], heap[parent]];
+                        i = parent;
+                    } else {
+                        break;
+                    }
+                }
+            },
+            heappop: (heap) => {
+                if (heap.length === 0) return null;
+                const min = heap[0];
+                const last = heap.pop();
+                if (heap.length > 0) {
+                    heap[0] = last;
+                    let i = 0;
+                    while (true) {
+                        const left = 2 * i + 1;
+                        const right = 2 * i + 2;
+                        let smallest = i;
+                        if (left < heap.length && heap[left][0] < heap[smallest][0]) {
+                            smallest = left;
+                        }
+                        if (right < heap.length && heap[right][0] < heap[smallest][0]) {
+                            smallest = right;
+                        }
+                        if (smallest !== i) {
+                            [heap[i], heap[smallest]] = [heap[smallest], heap[i]];
+                            i = smallest;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                return min;
+            }
+        };
+
+
+        // --- Animation Control ---
+        function animateTraversal() {
+            if (animationFrameId) {
+                clearTimeout(animationFrameId); // Clear any previous animation
+            }
+
+            if (currentStepIndex < currentAnimationSteps.length) {
+                const step = currentAnimationSteps[currentStepIndex];
+                document.getElementById('station-count-output').innerText = `Stations Visited: ${step.visited.size}`; // Update visited count in left panel
+                drawCurrentGraphState(step.visited, step.currentPath, true, step.finalPath, step.startNodeId, step.endNodeId);
+                currentStepIndex++;
+                animationFrameId = setTimeout(animateTraversal, animationSpeed);
+            } else {
+                // Animation finished, display final details
+                document.getElementById('station-count-output').innerText = `Stations Visited: ${currentAnimationSteps.length > 0 ? currentAnimationSteps[currentAnimationSteps.length - 1].visited.size : 0} (Traversal Complete)`;
+                // Ensure the final state is drawn with end node highlighted using the actual backend path
+                drawCurrentGraphState(undefined, undefined, false, true, currentAnimationSteps[0].startNodeId, currentAnimationSteps[currentAnimationSteps.length - 1].endNodeId, finalBackendPathForGraphView);
+            }
+        }
+
+
+        // Function to toggle between Map and Graph views
+        function toggleView(view) {
+            const mapContainer = document.getElementById('map-view-container');
+            const graphContainer = document.getElementById('graph-view-container');
+            const showMapBtn = document.getElementById('show-map-btn');
+            const showGraphBtn = document.getElementById('show-graph-btn');
+
+            if (view === 'map') {
+                mapContainer.classList.add('active');
+                graphContainer.classList.remove('active');
+                showMapBtn.classList.add('active');
+                showGraphBtn.classList.remove('active');
+                map.invalidateSize(); // Crucial for Leaflet when its container changes visibility/size
+                if (animationFrameId) {
+                    clearTimeout(animationFrameId); // Stop graph animation if switching away
+                }
+            } else { // view === 'graph'
+                mapContainer.classList.remove('active');
+                graphContainer.classList.add('active');
+                showMapBtn.classList.remove('active');
+                showGraphBtn.classList.add('active');
+                resizeCanvas(); // Resize canvas when it becomes visible
+                // Re-start animation from scratch if graph view is toggled on with previous path
+                if (currentAnimationSteps.length > 0) {
+                    currentStepIndex = 0; // Reset animation
+                    animateTraversal();
+                } else {
+                    // Draw the final backend path if no animation happened yet, but a path was found
+                    drawCurrentGraphState(undefined, undefined, false, finalBackendPathForGraphView.length > 0, undefined, undefined, finalBackendPathForGraphView);
+                }
+            }
+        }
+
+        // Function to clear only the route-specific markers and line on map
+        function clearRouteLayers() {
+            pathMarkers.forEach(m => map.removeLayer(m));
+            pathMarkers = [];
+            routeLayer.setLatLngs([]);
+        }
+
+        // Function to plot the entire metro network graph (stations and lines) on the map
+        async function plotFullMetroGraph() {
+            const res = await fetch("/graph-data");
+            graphDataFromBackend = await res.json(); // Store for canvas drawing and frontend algorithms
+
+            // Clear existing full graph layers before redrawing
+            allStationMarkers.forEach(m => map.removeLayer(m));
+            allStationMarkers = [];
+            graphLineLayer.clearLayers();
+
+            // Plot all stations as markers on Map
+            for (const node of graphDataFromBackend.nodes) {
+                const icon = L.divIcon({
+                    className: 'station-icon',
+                    html: '<div style="background-color: #007bff; width: 10px; height: 10px; border-radius: 50%; border: 1px solid white;"></div>',
+                    iconSize: [12, 12]
+                });
+                const marker = L.marker([node.lat, node.lon], {icon: icon}).bindPopup(node.id);
+                marker.addTo(map);
+                allStationMarkers.push(marker);
+            }
+
+            // Plot all metro lines (edges) on Map
+            for (const edge of graphDataFromBackend.edges) {
+                const sourceCoords = stationCoords[edge.source];
+                const targetCoords = stationCoords[edge.target];
+                if (sourceCoords && targetCoords) {
+                    const line = L.polyline([sourceCoords, targetCoords], {color: '#888', weight: 2, opacity: 0.7}).addTo(graphLineLayer);
+                }
+            }
+            // Initially draw graph on canvas as well (empty state)
+            drawCurrentGraphState();
+        }
+
+        // Function to plot the calculated route on the map
+        function plotRoute(pathCoords, pathStations) {
+            clearRouteLayers(); // Clear previous path highlights
+
+            if (!pathCoords || pathCoords.length === 0) return;
+
+            // Define custom icons for start and end points
+            const startIcon = L.divIcon({
+                className: 'start-icon',
+                html: '<div style="background-color: green; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; display: flex; justify-content: center; align-items: center; color: white; font-weight: bold; font-size: 8px;">S</div>',
+                iconSize: [18, 18],
+                iconAnchor: [9, 9]
+            });
+            const endIcon = L.divIcon({
+                className: 'end-icon',
+                html: '<div style="background-color: red; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; display: flex; justify-content: center; align-items: center; color: white; font-weight: bold; font-size: 8px;">E</div>',
+                iconSize: [18, 18],
+                iconAnchor: [9, 9]
+            });
+            const intermediateIcon = L.divIcon({
+                className: 'intermediate-icon',
+                html: '<div style="background-color: blue; width: 10px; height: 10px; border-radius: 50%; border: 1px solid white;"></div>',
+                iconSize: [12, 12],
+                iconAnchor: [6, 6]
+            });
+
+            // Add markers for stations in the path
+            for (let i = 0; i < pathCoords.length; i++) {
+                const coords = pathCoords[i];
+                const stationName = pathStations[i];
+                let markerIcon = intermediateIcon;
+                if (i === 0) {
+                    markerIcon = startIcon;
+                } else if (i === pathCoords.length - 1) {
+                    markerIcon = endIcon;
+                }
+
+                const marker = L.marker(coords, {icon: markerIcon}).bindPopup(stationName);
+                marker.addTo(map);
+                pathMarkers.push(marker);
+            }
+
+            // Draw the route line
+            routeLayer.setLatLngs(pathCoords);
+            routeLayer.bringToFront();
+
+            // Fit map to route bounds
+            if (pathCoords.length > 0) {
+                var bounds = L.latLngBounds(pathCoords);
+                map.fitBounds(bounds, {padding: [50, 50]});
+            }
+        }
+
+        // Function to find path via backend and initiate animation
+        async function findPath() {
+            const start = document.getElementById("start-area").value;
+            const end = document.getElementById("end-area").value;
+            const algo = document.getElementById("algorithm").value;
+
+            if (!start || !end) {
+                showMessage("Please select both start and end stations.", "bot");
+                return;
+            }
+
+            // Clear previous animation and details
+            if (animationFrameId) {
+                clearTimeout(animationFrameId);
+                animationFrameId = null;
+            }
+            document.getElementById('path-stations-output').innerText = `Path: -`;
+            document.getElementById('station-count-output').innerText = `Stations: 0`;
+            document.getElementById('total-distance-output').innerText = `Total Distance: -`;
+            document.getElementById('estimated-time-output').innerText = `Estimated Time: -`;
+            currentStepIndex = 0;
+            currentAnimationSteps = [];
+            finalBackendPathForGraphView = []; // Clear previous backend path
+            drawCurrentGraphState(); // Clear graph view to initial state
+
+            showMessage(`Searching for a path from **${start}** to **${end}** using **${algo.toUpperCase().replace('_', ' ')}**...`, "bot");
+
+            // Get traversal steps for animation (frontend calculation)
+            if (algo !== 'ao_star') {
+                currentAnimationSteps = getTraversalSteps(start, end, algo, graphDataFromBackend);
+            }
+            
+            // Fetch final path details from backend (for distance and time)
+            const res = await fetch("/find-path", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ start, end, algo })
+            });
+
+            const data = await res.json();
+            
+            if (data.error) {
+                showMessage(data.error, "bot");
+                return;
+            }
+            
+            // Store the actual path from backend for final graph view display
+            if (data.path && data.path.length > 0) {
+                finalBackendPathForGraphView = data.path;
+            } else {
+                finalBackendPathForGraphView = [];
+            }
+
+
+            // Trigger animation if graph view is active or switch to it
+            if (!document.getElementById('graph-view-container').classList.contains('active')) {
+                toggleView('graph'); // Switch to graph view if not active
+            }
+
+            if (currentAnimationSteps.length > 0) {
+                animateTraversal(); // Start animation
+            } else {
+                // If no animation steps (e.g., start === end or path not found by frontend sim)
+                // Just draw the final backend path if available
+                drawCurrentGraphState(undefined, undefined, false, finalBackendPathForGraphView.length > 0, start, end, finalBackendPathForGraphView);
+                showMessage("No specific traversal steps for animation, showing final path.", "bot");
+            }
+
+
+            if (data.path && data.path.length > 0) {
+                // Update text output in the left panel
+                document.getElementById('path-stations-output').innerHTML = `Path: ${data.path.join(" → ")}`;
+                document.getElementById('station-count-output').innerHTML = `Stations: **${data.station_count}**`;
+                document.getElementById('total-distance-output').innerHTML = `Total Distance: **${data.total_distance} km**`;
+                document.getElementById('estimated-time-output').innerHTML = `Estimated Time: **${data.estimated_time_minutes} minutes**`;
+
+                // Show message in chat box
+                showMessage(
+                    `Using **${algo.toUpperCase().replace('_', ' ')}** Algorithm:
+                    <br>→ ${data.path.join(" → ")}
+                    <br>Number of stations: **${data.station_count}**
+                    <br>Total distance: **${data.total_distance} km**
+                    <br>Estimated time: **${data.estimated_time_minutes} minutes**`,
+                    "bot"
+                );
+
+                // Plot on map
+                plotRoute(data.path_coords, data.path);
+
+            } else {
+                showMessage("No route found between " + start + " and " + end + ".", "bot");
+                plotRoute([], []); // Clear any previous route on map
+                drawCurrentGraphState(); // Clear any previous route on canvas
+                document.getElementById('path-stations-output').innerText = `Path: -`;
+                document.getElementById('station-count-output').innerText = `Stations: 0`;
+                document.getElementById('total-distance-output').innerText = `Total Distance: -`;
+                document.getElementById('estimated-time-output').innerText = `Estimated Time: -`;
+            }
+        }
+
+        // Function to display messages in the chat box with typing effect
+        function showMessage(text, sender) {
+            const box = document.getElementById("chat-box");
+            const div = document.createElement("div");
+            div.className = sender === "user" ? "user-msg" : "bot-msg";
+            div.innerHTML = ''; // Clear innerHTML before typing
+            box.appendChild(div);
+
+            if (sender === "bot") {
+                let i = 0;
+                function typeChar() {
+                    if (i < text.length) {
+                        if (text.substring(i, i + 2) === "**") {
+                            const closeTag = text.indexOf("**", i + 2);
+                            if (closeTag !== -1) {
+                                const boldText = text.substring(i + 2, closeTag);
+                                const strongTag = document.createElement("strong");
+                                strongTag.innerText = boldText;
+                                div.appendChild(strongTag);
+                                i = closeTag + 2;
+                                setTimeout(typeChar, 20);
+                                return;
+                            }
+                        } else if (text.substring(i, i + 4) === "<br>") {
+                            div.appendChild(document.createElement("br"));
+                            i += 4;
+                            setTimeout(typeChar, 20);
+                            return;
+                        }
+                        div.innerHTML += text.charAt(i);
+                        i++;
+                        box.scrollTop = box.scrollHeight;
+                        setTimeout(typeChar, 20);
+                    } else {
+                        // Remove blinking cursor effect when typing is finished
+                        if (div.classList.contains('bot-msg')) {
+                            div.classList.remove('bot-msg');
+                        }
+                    }
+                }
+                typeChar();
+            } else {
+                div.innerText = text;
+                box.scrollTop = box.scrollHeight;
+            }
+        }
+
+        // Function to load stations into dropdowns
+        async function loadStations() {
+            const res = await fetch("/stations");
+            const stations = await res.json();
+
+            const startSelect = document.getElementById("start-area");
+            const endSelect = document.getElementById("end-area");
+
+            stations.forEach(station => {
+                const option1 = document.createElement("option");
+                option1.value = station;
+                option1.innerText = station;
+                startSelect.appendChild(option1);
+
+                const option2 = document.createElement("option");
+                option2.value = station;
+                option2.innerText = station;
+                endSelect.appendChild(option2);
+            });
+
+            // Set default selections for convenience
+            startSelect.value = "Thousand Lights";
+            endSelect.value = "Mannadi";
+
+            // Plot the full metro graph on the map when it's initialized
+            plotFullMetroGraph();
+        }
+
+        // Call loadStations when the window finishes loading
+        window.onload = function() {
+            loadStations();
+            resizeCanvas(); // Initial resize
+            window.addEventListener('resize', resizeCanvas); // Resize on window change
+            canvas.style.cursor = 'grab'; // Set initial cursor for draggable canvas
+            // Set graph view as default active
+            toggleView('graph');
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,291 @@
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #f5f7fa, #c3cfe2);
+    margin: 0;
+    padding: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden; /* Hide scrollbars for the body */
+}
+
+.main-layout-container {
+    display: flex; /* Use flexbox for two columns */
+    width: 95%; /* Adjust as needed */
+    max-width: 1200px; /* Max width for larger screens */
+    height: 95vh; /* Full viewport height */
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+    border: 2px solid #007bff;
+    overflow: hidden; /* Ensure content within doesn't overflow rounded corners */
+}
+
+.left-panel {
+    flex: 0 0 40%; /* Fixed 40% width, no grow/shrink */
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    box-sizing: border-box;
+    border-right: 1px solid #ddd; /* Separator line */
+    background-color: #fefefe;
+}
+
+#chat-box {
+    flex-grow: 1; /* Allows chat box to take available space */
+    flex-shrink: 1;
+    min-height: 100px;
+    overflow-y: auto;
+    padding-bottom: 20px; /* Space before input area */
+    box-sizing: border-box;
+    border-bottom: 1px solid #eee; /* Separator for chat and input */
+    margin-bottom: 15px; /* Space below chat box */
+}
+
+.user-msg, .bot-msg {
+    margin: 10px 0;
+    padding: 12px 18px;
+    border-radius: 18px;
+    max-width: 80%;
+    line-height: 1.4;
+    font-size: 15px;
+    word-wrap: break-word;
+    box-sizing: border-box;
+    display: block;
+    clear: both;
+}
+
+.user-msg {
+    background-color: #dcf8c6;
+    margin-left: auto;
+    margin-right: 0;
+}
+
+.bot-msg {
+    background-color: #e6ecf0;
+    margin-right: auto;
+    margin-left: 0;
+    border-left: 5px solid #007bff;
+}
+
+.input-area {
+    flex-shrink: 0; /* Don't shrink input area */
+    padding: 10px 0; /* Adjusted padding */
+    background: #fefefe;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    box-sizing: border-box;
+    border-top: 1px solid #eee; /* Separator for input and path output */
+    padding-top: 15px;
+}
+
+.input-area label {
+    font-weight: bold;
+    flex-basis: 100%;
+    margin-bottom: -5px;
+}
+
+.input-area select {
+    padding: 10px;
+    font-size: 14px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    background: #fff;
+    min-width: 120px;
+    flex-grow: 1;
+}
+
+button {
+    padding: 10px 16px;
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.3s ease;
+    flex-grow: 1;
+    min-width: 100px;
+}
+
+button:hover {
+    background: #0056b3;
+}
+
+#path-output-details {
+    flex-shrink: 0;
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #eee;
+    font-size: 14px;
+    line-height: 1.6;
+    background-color: #fefefe;
+}
+
+#path-output-details p {
+    margin: 5px 0;
+}
+
+#path-output-details strong {
+    color: #0056b3; /* Highlight bold text */
+}
+
+.right-panel {
+    flex: 1; /* Takes remaining 60% width and grows/shrinks */
+    display: flex;
+    flex-direction: column;
+    background-color: #f0f0f0;
+}
+
+.view-toggle {
+    display: flex;
+    justify-content: center;
+    padding: 10px;
+    background-color: #f0f0f0;
+    border-bottom: 1px solid #ddd;
+    flex-shrink: 0; /* Prevent buttons from shrinking */
+}
+
+.view-toggle button {
+    padding: 8px 15px;
+    margin: 0 5px;
+    border: 1px solid #007bff;
+    border-radius: 5px;
+    background-color: #fff;
+    color: #007bff;
+    cursor: pointer;
+    transition: background-color 0.3s ease, color 0.3s ease;
+    font-weight: normal;
+}
+
+.view-toggle button.active {
+    background-color: #007bff;
+    color: white;
+    font-weight: bold;
+}
+
+.view-toggle button:hover:not(.active) {
+    background-color: #e6f2ff;
+}
+
+.map-view, .graph-view {
+    flex-grow: 1; /* Takes all available vertical space */
+    width: 100%;
+    box-sizing: border-box;
+    display: none; /* Hidden by default */
+    position: relative; /* For canvas, if needed */
+}
+
+.map-view.active, .graph-view.active {
+    display: flex; /* Show when active */
+    flex-direction: column; /* Allow content to stack */
+    justify-content: flex-start; /* Align content to top */
+    align-items: center;
+    padding-top: 5px; /* Add some padding at top */
+}
+
+#map {
+    width: 100%;
+    height: 100%;
+}
+
+#metro-graph-canvas {
+    width: 100%;
+    height: 100%; /* Make canvas take full height of its parent */
+    display: block;
+    background-color: #fefefe; /* White background as requested */
+    border-radius: 8px; /* Match container border radius */
+    cursor: grab;
+}
+
+/* Removed specific styling for #visited-node-count, #final-path-details as they are now in left panel */
+
+/* Custom Leaflet DivIcons */
+.station-icon div {
+    background-color: #888;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1px solid white;
+}
+
+.start-icon div {
+    background-color: green;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid white;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: white;
+    font-weight: bold;
+    font-size: 8px;
+}
+
+.end-icon div {
+    background-color: red;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid white;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: white;
+    font-weight: bold;
+    font-size: 8px;
+}
+
+.intermediate-icon div {
+    background-color: blue;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1px solid white;
+}
+
+/* Responsive adjustments for smaller screens */
+@media (max-width: 768px) {
+    .main-layout-container {
+        flex-direction: column; /* Stack columns on small screens */
+        height: auto;
+        min-height: 100vh;
+    }
+
+    .left-panel, .right-panel {
+        flex: 1 1 100%; /* Take full width */
+        border-right: none;
+        border-bottom: 1px solid #ddd; /* Separator when stacked */
+    }
+
+    .left-panel {
+        padding-bottom: 0; /* Adjust padding for stacked layout */
+    }
+
+    .input-area {
+        flex-direction: column;
+        align-items: stretch;
+        min-height: auto;
+    }
+
+    .input-area label,
+    .input-area select,
+    button {
+        flex-basis: auto;
+        width: 100%;
+        margin-bottom: 10px;
+    }
+
+    .input-area button:last-child {
+        margin-bottom: 0;
+    }
+
+    #chat-box {
+        max-height: 250px; /* Limit chat box height on small screens */
+    }
+}
